@@ -103,9 +103,9 @@ button,input{font-family:inherit}
 .bTitle{font-size:clamp(1.15rem,3.4vw,1.5rem);font-weight:900;line-height:1.5}
 .bHint{font-size:.88rem;font-weight:600;color:#5b6674;margin-top:2px}
 .row{display:flex;gap:10px;margin-top:14px;align-items:stretch}
-#numInput{flex:1;min-width:0;height:54px;border:3px solid var(--teal);border-radius:16px;padding:0 14px;font-size:1.5rem;font-weight:800;
-  text-align:center;color:var(--ink);background:#F4FEFF;outline:none;transition:.2s;direction:ltr;letter-spacing:1px}
-#numInput::placeholder{color:#a3b3bd;font-weight:600;font-size:1.05rem;letter-spacing:0;direction:rtl}
+#numInput{flex:1;min-width:0;height:54px;border:3px solid var(--teal);border-radius:16px;padding:0 14px;font-size:1.15rem;font-weight:800;
+  text-align:center;color:var(--ink);background:#F4FEFF;outline:none;transition:.2s;direction:rtl;letter-spacing:0}
+#numInput::placeholder{color:#a3b3bd;font-weight:600;font-size:1rem;letter-spacing:0;direction:rtl}
 #numInput:focus{border-color:var(--gold2);box-shadow:0 0 0 5px rgba(245,196,0,.35);background:#fff}
 #numInput.bad{border-color:var(--red);background:#FFF3F1;box-shadow:0 0 0 5px rgba(229,48,27,.18)}
 #okBtn{flex:none;min-width:88px;border:3px solid var(--ink);border-radius:16px;cursor:pointer;font-size:1.3rem;font-weight:900;color:var(--ink);
@@ -346,10 +346,10 @@ tr.now td{background:#FFF3B8 !important}
     </div>
 
     <div class="bubble" id="bubble" role="group" aria-labelledby="bTitle">
-      <div class="bTitle" id="bTitle">ادخل رقمك في الكشف</div>
-      <div class="bHint" id="bHint">اكتب رقمك الموجود بجوار اسمك في كشف الامتياز ثم اضغط OK</div>
+      <div class="bTitle" id="bTitle">ادخل اسمك رباعياً</div>
+      <div class="bHint" id="bHint">اكتب اسمك باللغة العربية (أربعة أسماء) كما في كشف الامتياز ثم اضغط OK</div>
       <div class="row">
-        <input id="numInput" type="text" inputmode="numeric" autocomplete="off" enterkeyhint="go" maxlength="12" placeholder="رقمك في الكشف" aria-label="رقمك في الكشف">
+        <input id="numInput" type="text" dir="rtl" lang="ar" inputmode="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go" maxlength="120" placeholder="اسمك رباعياً بالعربي" aria-label="اسمك رباعياً باللغة العربية">
         <button id="okBtn" type="button">OK</button>
       </div>
       <div id="msg" role="status" aria-live="polite"></div>
@@ -391,7 +391,7 @@ tr.now td{background:#FFF3B8 !important}
   </article>
   <div class="actions">
     <button class="abtn pri" id="printBtn" type="button">طباعة الجدول</button>
-    <button class="abtn" id="backBtn" type="button">البحث برقم آخر</button>
+    <button class="abtn" id="backBtn" type="button">البحث باسم آخر</button>
   </div>
   <div class="copy">المعهد الفني للتمريض – جامعة المنصورة</div>
 </main>
@@ -439,21 +439,62 @@ var fav=document.createElement("link");fav.rel="icon";fav.href=LOGO;document.hea
 })();
 
 /* ---------- البحث والتحقق ---------- */
-var byNum={}; DATA.students.forEach(function(s){byNum[s[0]]=s});
+/* ---------- مطابقة الاسم العربي المرنة ---------- */
+function normName(s){
+  return String(s)
+    .replace(/[\u064B-\u065F\u0670\u0640\u06D6-\u06ED]/g,"")      /* تشكيل + تطويل */
+    .replace(/[\u0622\u0623\u0625\u0671\u0672\u0673\u0675]/g,"\u0627") /* أ إ آ ٱ → ا */
+    .replace(/[\u0629\u06C1\u06BE\u06D5]/g,"\u0647")               /* ة → ه */
+    .replace(/[\u0649\u0626\u06CC]/g,"\u064A")                     /* ى ئ ی → ي */
+    .replace(/[\u0624\u0676]/g,"\u0648")                           /* ؤ → و */
+    .replace(/\u06A9/g,"\u0643")                                   /* ک → ك */
+    .replace(/\u0621/g,"");                                        /* ء */
+}
+/* مفتاح المقارنة: بدون مسافات وبدون الألف (يعالج أيضاً خلل تبديل "لا/ال" في الكشف) */
+function nameKey(s){return normName(s).replace(/[^\u0621-\u064A]/g,"").replace(/\u0627/g,"")}
+var PRE_W={"عبد":1,"بو":1,"بن":1};            /* عبد / أبو / ابن + الاسم التالي = اسم واحد */
+var SUF_W={"لله":1,"لدين":1,"لعبدين":1};      /* (منه) الله، (سيف) الدين، (زين) العابدين */
+function nameUnits(name){
+  var out=[],glue=false;
+  String(name).trim().split(/\s+/).forEach(function(w){
+    var k=nameKey(w); if(!k) return;
+    if(out.length&&(glue||SUF_W[k])){var u=out[out.length-1];u.w+=" "+w;u.k+=k;glue=false}
+    else{out.push({w:w,k:k});glue=!!PRE_W[k]}
+  });
+  return out;
+}
+function buildIndex(students){
+  return students.map(function(rec){
+    var wk=String(rec[1]).trim().split(/\s+/).map(nameKey).filter(Boolean), cuts={}, n=0;
+    wk.forEach(function(k){n+=k.length;cuts[n]=1});
+    var u=nameUnits(rec[1]), need=0;
+    u.slice(0,4).forEach(function(x){need+=x.k.length});
+    return {rec:rec,key:wk.join(""),cuts:cuts,need:need,first:u.length?u[0].w:rec[1]};
+  });
+}
+function matchName(raw,INDEX){
+  raw=String(raw).trim();
+  if(!raw) return {type:"empty"};
+  if(/[A-Za-z0-9\u0660-\u0669\u06F0-\u06F9]/.test(raw)) return {type:"lang"};
+  var k=nameKey(raw);
+  if(!k) return {type:"lang"};
+  var pre=INDEX.filter(function(S){return S.cuts[k.length]&&S.key.indexOf(k)===0});
+  if(!pre.length) return {type:"nomatch"};
+  var ok=pre.filter(function(S){return k.length>=S.need});
+  if(!ok.length) return {type:"short"};
+  var ex=ok.filter(function(S){return S.key===k});
+  if(ex.length===1) return {type:"ok",S:ex[0]};
+  if(ex.length>1) return {type:"dup"};
+  if(ok.length===1) return {type:"ok",S:ok[0]};
+  return {type:"multi"};
+}
+var INDEX=buildIndex(DATA.students);
 var hero=$("#hero"), input=$("#numInput"), okBtn=$("#okBtn"), msg=$("#msg"), bubble=$("#bubble"), bTitle=$("#bTitle"), bHint=$("#bHint");
 var BASE_TITLE=bTitle.textContent, BASE_HINT=bHint.textContent, busy=false;
-function normDigits(s){return s.replace(/[\u0660-\u0669]/g,function(d){return d.charCodeAt(0)-0x660}).replace(/[\u06F0-\u06F9]/g,function(d){return d.charCodeAt(0)-0x6F0})}
 function setState(st){hero.setAttribute("class","hero st-"+st)}
 function talkAgain(){var m=hero.querySelector(".m-talk");m.style.animation="none";void m.getBBox();m.style.animation=""}
 function say(kind,text){msg.className=kind;msg.textContent=text}
 function shake(){bubble.classList.remove("shake");void bubble.offsetWidth;bubble.classList.add("shake")}
-function classify(raw){
-  var t=normDigits(raw.trim());
-  if(!t) return {type:"empty"};
-  if(!/^[0-9]+$/.test(t)) return {type:"text"};
-  var n=parseInt(t,10);
-  return byNum[n]?{type:"ok",rec:byNum[n]}:{type:"nomatch"};
-}
 function confetti(){
   var cols=["#F5C400","#12C7CF","#E5301B","#8DC63F","#ffffff"],r=hero.getBoundingClientRect(),cx=r.left+r.width/2,cy=r.top+r.height*.4;
   for(var i=0;i<34;i++){var c=document.createElement("i");c.className="confetti";
@@ -464,26 +505,28 @@ function confetti(){
     c.style.setProperty("--rot",(Math.random()*720-360)+"deg");
     document.body.appendChild(c);setTimeout(function(x){x.remove()},2000,c)}
 }
+function fail(title,text){
+  setState("sad");input.classList.add("bad");shake();
+  bTitle.textContent=title;bHint.textContent="";say("err",text);input.select()}
 function submit(){
   if(busy) return;
-  var r=classify(input.value);
+  var r=matchName(input.value,INDEX);
   if(r.type==="empty"){
-    setState("idle");input.classList.add("bad");shake();say("warn","من فضلك اكتب رقمك في الكشف أولاً ثم اضغط OK");input.focus();return}
-  if(r.type==="text"){
-    setState("sad");input.classList.add("bad");shake();
-    bTitle.textContent="أوه! حدث خطأ";bHint.textContent="";
-    say("err","لقد أدخلت النص خطأ ❌ اكتب رقمك في الكشف بالأرقام فقط (بدون حروف أو رموز).");input.select();return}
+    setState("idle");input.classList.add("bad");shake();say("warn","من فضلك اكتب اسمك رباعياً أولاً ثم اضغط OK");input.focus();return}
+  if(r.type==="lang"){
+    return fail("أوه! حدث خطأ","ادخل اسمك باللغة العربية رباعياً ❌ (بدون أرقام أو حروف إنجليزية).")}
+  if(r.type==="short"){
+    return fail("أوه! الاسم ناقص","اكتب اسمك رباعياً ❌ أربعة أسماء على الأقل كما في كشف الامتياز.")}
+  if(r.type==="multi"||r.type==="dup"){
+    return fail("أوه! الاسم متشابه","يوجد أكثر من طالب بنفس هذه الأسماء ❌ اكتب اسمك كاملاً (مع الاسم الخامس وما بعده).")}
   if(r.type==="nomatch"){
-    setState("sad");input.classList.add("bad");shake();
-    bTitle.textContent="أوه! حدث خطأ";bHint.textContent="";
-    say("err","لقد أدخلت الرقم خطأ ❌ لا يوجد رقم بهذا الكشف، راجع رقمك وحاول مرة أخرى.");input.select();return}
+    return fail("أوه! حدث خطأ","لم نجد هذا الاسم في كشف الامتياز ❌ راجع اسمك واكتبه رباعياً بالعربية وحاول مرة أخرى.")}
   /* نجاح */
   busy=true;okBtn.disabled=true;input.classList.remove("bad");input.blur();
   setState("happy");confetti();
-  var first=r.rec[1].split(" ")[0];
-  bTitle.textContent="أهلاً بك يا "+first+"! 🎉";bHint.textContent="";
+  bTitle.textContent="أهلاً بك يا "+r.S.first+"! 🎉";bHint.textContent="";
   say("ok","تم العثور على بياناتك.. جارِ تجهيز جدول الامتياز الخاص بك");
-  setTimeout(function(){showResult(r.rec)},2100);
+  setTimeout(function(){showResult(r.S.rec)},2100);
 }
 input.addEventListener("input",function(){
   input.classList.remove("bad");
